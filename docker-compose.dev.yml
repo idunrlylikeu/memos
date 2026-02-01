@@ -10,7 +10,7 @@ services:
       dockerfile: docker/backend/Dockerfile.dev
     container_name: memos-backend-dev
     ports:
-      - "8081:8081"
+      - "6969:8081"
     volumes:
       # Mount source code for hot reload
       - .:/app
@@ -31,7 +31,7 @@ services:
       dockerfile: ../docker/frontend/Dockerfile.dev
     container_name: memos-frontend-dev
     ports:
-      - "3001:3001"
+      - "6767:3001"
     volumes:
       # Mount source for hot reload
       - ./web:/app

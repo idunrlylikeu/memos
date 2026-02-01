@@ -1,0 +1,25 @@
+# Production Docker Compose
+# Usage: docker-compose -f docker-compose.prod.yml up -d
+# Access at http://localhost:5230
+
+services:
+  memos:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile.prod
+      target: builder
+      args:
+        VERSION: latest
+        COMMIT: local
+    container_name: memos-prod
+    ports:
+      - "5230:5230"
+    volumes:
+      # Persist data (SQLite database and uploads)
+      - memos-data:/var/opt/memos
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
+
+volumes:
+  memos-data:

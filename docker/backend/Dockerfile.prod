@@ -1,0 +1,59 @@
+# Production Dockerfile for Backend
+# This builds the production binary with embedded frontend
+# Note: Frontend must be built first (run frontend Dockerfile.prod)
+
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates
+
+# Download dependencies (cached layer)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Copy pre-built frontend files (from frontend build)
+# These should be in server/router/frontend/dist
+COPY --from=frontend-build /app/dist ./server/router/frontend/dist
+
+# Build the binary
+ARG TARGETOS TARGETARCH VERSION COMMIT
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build \
+      -trimpath \
+      -ldflags="-s -w -extldflags '-static'" \
+      -tags netgo,osusergo \
+      -o memos \
+      ./cmd/memos
+
+# Final runtime image
+FROM alpine:3.21
+
+RUN apk add --no-cache tzdata ca-certificates su-exec && \
+    addgroup -g 10001 -S nonroot && \
+    adduser -u 10001 -S -G nonroot -h /var/opt/memos nonroot && \
+    mkdir -p /var/opt/memos && \
+    chown -R nonroot:nonroot /var/opt/memos
+
+WORKDIR /var/opt/memos
+
+# Copy binary
+COPY --from=builder /build/memos /usr/local/memos/memos
+
+# Copy entrypoint script
+COPY --chmod=755 scripts/entrypoint.sh /usr/local/memos/entrypoint.sh
+
+VOLUME /var/opt/memos
+
+ENV TZ="UTC" \
+    MEMOS_PORT="5230"
+
+EXPOSE 5230
+
+ENTRYPOINT ["/usr/local/memos/entrypoint.sh", "/usr/local/memos/memos"]

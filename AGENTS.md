@@ -76,6 +76,133 @@ web/
 ├── package.json        # Dependencies
 └── vite.config.mts     # Vite config with dev proxy
 
+### Docker Architecture
+
+**Development Setup (docker-compose.dev.yml):**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Docker Network                       │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│  ┌──────────────────┐         ┌──────────────────┐     │
+│  │  Frontend Dev    │         │  Backend Dev     │     │
+│  │  Container       │────────▶│  Container       │     │
+│  │                  │ Proxy  │                  │     │
+│  │  - Vite dev      │  API   │  - Go with air   │     │
+│  │  - Port 3001     │        │  - Hot reload    │     │
+│  │  - pnpm dev      │        │  - Port 8081     │     │
+│  │                  │        │  - SQLite        │     │
+│  └──────────────────┘         └──────────────────┘     │
+│         ▲                                                    │
+│         │                                                    │
+│         │ Hot reload (volume mounts)                        │
+│         │                                                    │
+│  ┌──────┴──────────────────────────────────────────────┐   │
+│  │           Host Filesystem                           │   │
+│  │  ./web/        → Frontend container /app            │   │
+│  │  ./ (Go files) → Backend container /app              │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Development Containers:**
+
+1. **Backend Container** (`docker/backend/Dockerfile.dev`):
+   - Base: `golang:1.25-alpine`
+   - Tools: `air` for hot reload
+   - Volume mounts: Source code for live reload
+   - Excludes: `web/node_modules`, `tmp/`
+   - Port: 8081
+   - Config: `.air.toml`
+
+2. **Frontend Container** (`docker/frontend/Dockerfile.dev`):
+   - Base: `node:20-alpine`
+   - Package manager: `pnpm`
+   - Volume mounts: `./web` directory
+   - Environment: `DEV_PROXY_SERVER=http://backend:8081`
+   - Port: 3001
+   - Command: `pnpm dev --host`
+
+**Production Setup (docker-compose.prod.yml):**
+
+```
+┌─────────────────────────────────┐
+│   Single Production Container   │
+├─────────────────────────────────┤
+│                                 │
+│  ┌───────────────────────────┐ │
+│  │   Alpine Linux            │ │
+│  │                           │ │
+│  │  ┌─────────────────────┐  │ │
+│  │  │ Go Binary           │  │ │
+│  │  │ (with embedded      │  │ │
+│  │  │  frontend files)    │  │ │
+│  │  └─────────────────────┘  │ │
+│  │                           │ │
+│  │  SQLite DB /var/opt/memos │ │
+│  └───────────────────────────┘ │
+│                                 │
+│  Port: 5230                     │
+│  Volume: memos-data             │
+└─────────────────────────────────┘
+```
+
+**Production Container:**
+- Base: `alpine:3.21`
+- Single Go binary with embedded frontend
+- Data persistence via Docker volume
+- Port: 5230 (default)
+- User: `nonroot` (uid 10001)
+
+**Docker File Structure:**
+
+```
+docker/
+├── backend/
+│   ├── Dockerfile.dev    # Development with air hot reload
+│   │   - Installs air
+│   │   - Mounts source code
+│   │   - Runs air for live reload
+│   │
+│   └── Dockerfile.prod   # Production binary
+│       - Multi-stage build
+│       - Embeds frontend dist
+│       - Minimal alpine runtime
+│
+└── frontend/
+    ├── Dockerfile.dev    # Development server
+    │   - Installs pnpm
+    │   - Mounts web/ directory
+    │   - Runs vite dev server
+    │
+    └── Dockerfile.prod   # Production build
+        - Runs pnpm build
+        - Outputs to ./dist
+        - Used by backend Dockerfile.prod
+```
+
+**Hot Reload Configuration (`.air.toml`):**
+
+```toml
+[build]
+  cmd = "go build -o ./tmp/memos ./cmd/memos"
+  bin = "tmp/memos"
+  include_ext = ["go", "tpl", "tmpl", "html", "yaml", "yml"]
+  exclude_dir = ["web", "tmp", "vendor", "node_modules", "dist"]
+  delay = 1000  # ms before rebuild
+```
+
+**Volume Mount Strategy:**
+
+Development volumes use "anonymous volumes" to avoid conflicts:
+- `/app/web/node_modules` - Container's own node_modules
+- `/app/tmp` - Air build artifacts
+- `go-mod-cache` - Go module cache for faster rebuilds
+
+This prevents host node_modules from conflicting with container architecture.
+
 plugin/                 # Backend plugins
 ├── scheduler/         # Cron jobs
 ├── email/            # Email delivery
@@ -84,6 +211,14 @@ plugin/                 # Backend plugins
 ├── markdown/         # Markdown parsing & rendering
 ├── httpgetter/        # HTTP fetching (metadata, images)
 └── storage/s3/       # S3 storage backend
+
+docker/                 # Docker configurations
+├── backend/
+│   ├── Dockerfile.dev  # Development with air hot reload
+│   └── Dockerfile.prod # Production build
+└── frontend/
+    ├── Dockerfile.dev  # Vite dev server
+    └── Dockerfile.prod # Frontend build stage
 ```
 
 ## Key Architectural Patterns
@@ -236,6 +371,38 @@ pnpm build
 pnpm release
 ```
 
+### Docker Development
+
+```bash
+# Development with hot reload (frontend + backend)
+docker-compose -f docker-compose.dev.yml up
+
+# Development - backend only
+docker-compose -f docker-compose.dev.yml up backend
+
+# Development - frontend only
+docker-compose -f docker-compose.dev.yml up frontend
+
+# Production build and run
+docker-compose -f docker-compose.prod.yml up -d
+
+# View logs
+docker-compose -f docker-compose.dev.yml logs -f
+
+# Stop containers
+docker-compose -f docker-compose.dev.yml down
+
+# Rebuild after changes
+docker-compose -f docker-compose.dev.yml build --no-cache
+```
+
+**Development Ports:**
+- Frontend (Vite hot reload): http://localhost:3001
+- Backend API: http://localhost:8081
+
+**Production Port:**
+- Single container (embedded frontend): http://localhost:5230
+
 ### Protocol Buffers
 
 ```bash
@@ -293,6 +460,77 @@ cd proto && buf breaking --against .git#main
 
 4. **Test Migration:**
    - Run `go test ./store/test/...` to verify
+
+### Docker Development Workflow
+
+**1. Initial Setup:**
+```bash
+# Clone repository
+git clone https://github.com/usememos/memos.git
+cd memos
+
+# Start development environment
+docker-compose -f docker-compose.dev.yml up
+```
+
+**2. Making Changes:**
+
+- **Backend changes (Go files):**
+  - Edit any `*.go` file in the repository
+  - Air detects changes → auto-rebuilds → restarts server
+  - Changes reflected in ~2-3 seconds
+  - Logs show: `[air] Building...` → `[air] Running...`
+
+- **Frontend changes (React/TS files):**
+  - Edit files in `web/src/` or `web/*.tsx`
+  - Vite HMR pushes updates to browser
+  - Changes reflected instantly (no full refresh for CSS/styled components)
+  - Component changes trigger fast refresh
+
+**3. Debugging:**
+
+```bash
+# Backend logs
+docker-compose -f docker-compose.dev.yml logs -f backend
+
+# Frontend logs
+docker-compose -f docker-compose.dev.yml logs -f frontend
+
+# Enter container for debugging
+docker-compose -f docker-compose.dev.yml exec backend sh
+docker-compose -f docker-compose.dev.yml exec frontend sh
+```
+
+**4. Testing Changes:**
+
+- Backend API: http://localhost:8081/api/v1/status
+- Frontend UI: http://localhost:3001
+- Both containers share the same SQLite database
+
+**5. Building for Production:**
+
+```bash
+# Stop dev environment
+docker-compose -f docker-compose.dev.yml down
+
+# Build and start production
+docker-compose -f docker-compose.prod.yml up -d
+
+# Access at http://localhost:5230
+```
+
+**6. Production Data Backup:**
+
+```bash
+# Create backup
+docker run --rm \
+  -v memos_memos-data:/data \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/memos-backup-$(date +%Y%m%d).tar.gz /data
+
+# List backups
+ls -lh memos-backup-*.tar.gz
+```
 
 ### Adding a New Frontend Page
 
@@ -421,6 +659,14 @@ cd web && pnpm lint
 | `server/server.go` | Echo server initialization, background runners |
 | `store/store.go` | Store wrapper with caching |
 | `store/driver.go` | Database driver interface |
+| `scripts/Dockerfile` | Original production Dockerfile (legacy) |
+| `docker/backend/Dockerfile.dev` | Development backend with air hot reload |
+| `docker/backend/Dockerfile.prod` | Production backend (recommended) |
+| `docker/frontend/Dockerfile.dev` | Development frontend with Vite |
+| `docker/frontend/Dockerfile.prod` | Frontend build stage |
+| `docker-compose.dev.yml` | Development orchestration |
+| `docker-compose.prod.yml` | Production orchestration |
+| `.air.toml` | Air hot reload configuration |
 
 ### API Layer
 
@@ -472,6 +718,44 @@ cd web && pnpm lint
 |----------|----------|-------------|
 | `DEV_PROXY_SERVER` | `http://localhost:8081` | Backend proxy target |
 
+### Docker Environment Variables
+
+| Variable | Default | Description |
+|----------|----------|-------------|
+| `MEMOS_PORT` | `8081` (dev) / `5230` (prod) | HTTP port |
+| `TZ` | `UTC` | Timezone |
+| `DEV_PROXY_SERVER` | `http://backend:8081` | Backend URL (dev frontend) |
+
+### Docker Volumes
+
+| Volume | Purpose | Persistence |
+|--------|---------|-------------|
+| `go-mod-cache` | Go module dependencies | Across container rebuilds |
+| `memos-data` | SQLite database + uploads | Production data persistence |
+| `/app/node_modules` | Frontend dependencies | Container-only (prevents host conflicts) |
+| `/app/tmp` | Air build artifacts | Container-only (hot reload) |
+
+### Database Behavior in Docker
+
+**Development (SQLite):**
+- Location: `/app/var/memos.db` (inside backend container)
+- All users share the same database file
+- Suitable for: Local development, single-user testing
+- Not persisted outside container (unless volume mounted)
+
+**Production (SQLite):**
+- Location: `/var/opt/memos/memos.db` (inside container)
+- Persisted via Docker volume `memos-data`
+- All users accessing your instance share the same database
+- Suitable for: Personal instances, small teams, low-to-medium traffic
+- For high concurrent users, consider PostgreSQL instead
+
+**Database Access:**
+- SQLite is a **single shared database** for all users
+- If you deploy Memos to a server, every user who accesses your web app connects to the same SQLite file
+- This is different from per-user databases - it's a multi-tenant system with shared data
+- Access control is handled at the application layer (user authentication, permissions, ACLs)
+
 ## CI/CD
 
 ### GitHub Workflows
@@ -503,6 +787,47 @@ cd web && pnpm lint
 
 ## Common Tasks
 
+### Docker Quick Reference
+
+```bash
+# Development - Start both services
+docker-compose -f docker-compose.dev.yml up
+
+# Development - Start in detached mode
+docker-compose -f docker-compose.dev.yml up -d
+
+# Development - View logs
+docker-compose -f docker-compose.dev.yml logs -f backend
+docker-compose -f docker-compose.dev.yml logs -f frontend
+
+# Development - Restart with changes
+docker-compose -f docker-compose.dev.yml restart backend
+
+# Development - Stop all
+docker-compose -f docker-compose.dev.yml down
+
+# Development - Rebuild (after dependency changes)
+docker-compose -f docker-compose.dev.yml build --no-cache backend
+docker-compose -f docker-compose.dev.yml build --no-cache frontend
+
+# Production - Build and start
+docker-compose -f docker-compose.prod.yml up -d
+
+# Production - View logs
+docker-compose -f docker-compose.prod.yml logs -f
+
+# Production - Stop
+docker-compose -f docker-compose.prod.yml down
+
+# Production - Backup data
+docker run --rm -v memos_memos-data:/data -v $(pwd):/backup alpine \
+  tar czf /backup/memos-backup.tar.gz /data
+
+# Production - Restore data
+docker run --rm -v memos_memos-data:/data -v $(pwd):/backup alpine \
+  tar xzf /backup/memos-backup.tar.gz -C /
+```
+
 ### Debugging API Issues
 
 1. Check Connect interceptor logs: `server/router/api/v1/connect_interceptors.go:79-105`
@@ -528,6 +853,58 @@ DRIVER=mysql DSN="user:pass@tcp(localhost:3306)/memos" go test ./...
 
 # PostgreSQL (requires running PostgreSQL server)
 DRIVER=postgres DSN="postgres://user:pass@localhost:5432/memos" go test ./...
+```
+
+### Docker Troubleshooting
+
+**Hot Reload Not Working:**
+
+1. **Backend (air not detecting changes):**
+   - Check volume mounts: `docker-compose -f docker-compose.dev.yml config`
+   - Verify `.air.toml` is in the root directory
+   - Check air logs: `docker-compose -f docker-compose.dev.yml logs backend`
+   - Ensure exclude_dir doesn't include your changed files
+
+2. **Frontend (Vite not detecting changes):**
+   - Verify `./web` is mounted to `/app`
+   - Check that `/app/node_modules` is an anonymous volume (prevents host conflicts)
+   - Look for Vite's HMR logs in container output
+
+**Container Build Issues:**
+
+1. **Slow builds:**
+   - Go module cache should speed up after first build
+   - Use `--no-cache` only if dependencies changed
+   - Pre-build frontend locally: `cd web && pnpm install`
+
+2. **Architecture mismatches:**
+   - Apple Silicon users: No action needed (auto-detected)
+   - BuildKit multi-platform support enabled by default
+
+**Port Conflicts:**
+
+```bash
+# Change ports in docker-compose.dev.yml:
+services:
+  backend:
+    ports:
+      - "9081:8081"  # Use 9081 instead of 8081
+  frontend:
+    ports:
+      - "4001:3001"  # Use 4001 instead of 3001
+```
+
+**Database Persistence:**
+
+```bash
+# Check SQLite database location
+docker-compose -f docker-compose.prod.yml exec memos ls -la /var/opt/memos/
+
+# Backup SQLite database
+docker-compose -f docker-compose.prod.yml exec memos cp /var/opt/memos/memos.db /var/opt/memos/backup.db
+
+# Restore from volume
+docker volume inspect memos_memos-data
 ```
 
 ## Plugin System

@@ -1,0 +1,22 @@
+# Development Dockerfile for Backend
+# Usage: docker-compose -f docker-compose.dev.yml up backend
+
+FROM golang:1.25-alpine
+
+WORKDIR /app
+
+# Install air for hot reload and git for go mod downloads
+RUN apk add --no-cache git air
+
+# Install go dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy everything for hot reload
+COPY . .
+
+# Expose port
+EXPOSE 8081
+
+# Run with air for hot reload
+CMD ["air", "-c", ".air.toml"]

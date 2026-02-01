@@ -1,0 +1,49 @@
+# Development Docker Compose with Hot Reload
+# Usage: docker-compose -f docker-compose.dev.yml up
+# Access frontend at http://localhost:3001
+# Access backend API at http://localhost:8081
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile.dev
+    container_name: memos-backend-dev
+    ports:
+      - "8081:8081"
+    volumes:
+      # Mount source code for hot reload
+      - .:/app
+      # Exclude node_modules to avoid conflicts
+      - /app/web/node_modules
+      - /app/web/dist
+      # Go module cache for faster builds
+      - go-mod-cache:/go/pkg/mod
+      # Air tmp directory
+      - /app/tmp
+    working_dir: /app
+    environment:
+      - MEMOS_PORT=8081
+
+  frontend:
+    build:
+      context: ./web
+      dockerfile: ../docker/frontend/Dockerfile.dev
+    container_name: memos-frontend-dev
+    ports:
+      - "3001:3001"
+    volumes:
+      # Mount source for hot reload
+      - ./web:/app
+      # Node modules in container to avoid conflicts
+      - /app/node_modules
+      - /app/.vite
+    working_dir: /app
+    environment:
+      # Backend URL for API proxy
+      - DEV_PROXY_SERVER=http://backend:8081
+    depends_on:
+      - backend
+
+volumes:
+  go-mod-cache:

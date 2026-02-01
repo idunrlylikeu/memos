@@ -1,0 +1,27 @@
+# Development Dockerfile for Frontend
+# Usage: docker-compose -f docker-compose.dev.yml up frontend
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install pnpm
+RUN npm install -g pnpm
+
+# Copy package files
+COPY package.json pnpm-lock.yaml ./
+
+# Install dependencies
+RUN pnpm install
+
+# Copy source code
+COPY . .
+
+# Expose Vite dev server port
+EXPOSE 3001
+
+# Environment variable for backend proxy
+ENV DEV_PROXY_SERVER=http://backend:8081
+
+# Run Vite dev server with hot reload
+CMD ["pnpm", "dev", "--host"]

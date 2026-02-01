@@ -5,8 +5,11 @@ FROM golang:1.25-alpine
 
 WORKDIR /app
 
-# Install air for hot reload and git for go mod downloads
-RUN apk add --no-cache git air
+# Install git for go mod downloads
+RUN apk add --no-cache git
+
+# Install air for hot reload
+RUN go install github.com/air-verse/air@latest
 
 # Install go dependencies
 COPY go.mod go.sum ./

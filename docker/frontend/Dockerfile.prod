@@ -1,0 +1,34 @@
+# Production Dockerfile for Frontend
+# This builds the frontend static files
+# The output will be embedded in the Go backend binary
+
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Install pnpm
+RUN npm install -g pnpm
+
+# Copy package files
+COPY package.json pnpm-lock.yaml ./
+
+# Install dependencies
+RUN pnpm install
+
+# Copy source code
+COPY . .
+
+# Build for production (output to server/router/frontend/dist)
+RUN pnpm build
+
+# Runtime stage - minimal image to hold built files
+FROM alpine:3.21
+
+WORKDIR /app
+
+# Copy built files
+COPY --from=builder /app/dist ./dist
+
+# This stage is used in the backend Dockerfile as --from=frontend-build
+# The backend will copy these files into server/router/frontend/dist
+CMD ["/bin/sh"]

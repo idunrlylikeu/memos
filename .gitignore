@@ -27,3 +27,4 @@ dist
 
 # Git worktrees
 .worktrees/
+web/package-lock.json

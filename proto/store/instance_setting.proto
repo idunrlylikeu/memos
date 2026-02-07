@@ -100,6 +100,8 @@ message InstanceMemoRelatedSetting {
   int32 content_length_limit = 3;
   // enable_double_click_edit enables editing on double click.
   bool enable_double_click_edit = 4;
+  // enable_custom_memo_date allows users to set custom creation dates for memos.
+  bool enable_custom_memo_date = 8;
   // reactions is the list of reactions.
   repeated string reactions = 7;
 }

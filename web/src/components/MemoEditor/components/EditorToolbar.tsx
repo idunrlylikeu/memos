@@ -4,6 +4,7 @@ import { useTranslate } from "@/utils/i18n";
 import { validationService } from "../services";
 import { useEditorContext } from "../state";
 import InsertMenu from "../Toolbar/InsertMenu";
+import MemoDatePicker from "./MemoDatePicker";
 import VisibilitySelector from "../Toolbar/VisibilitySelector";
 import type { EditorToolbarProps } from "../types";
 
@@ -28,7 +29,7 @@ export const EditorToolbar: FC<EditorToolbarProps> = ({ onSave, onCancel, memoNa
 
   return (
     <div className="w-full flex flex-row justify-between items-center mb-2">
-      <div className="flex flex-row justify-start items-center">
+      <div className="flex flex-row justify-start items-center gap-2">
         <InsertMenu
           isUploading={state.ui.isLoading.uploading}
           location={state.metadata.location}
@@ -36,6 +37,7 @@ export const EditorToolbar: FC<EditorToolbarProps> = ({ onSave, onCancel, memoNa
           onToggleFocusMode={handleToggleFocusMode}
           memoName={memoName}
         />
+        <MemoDatePicker />
       </div>
 
       <div className="flex flex-row justify-end items-center gap-2">

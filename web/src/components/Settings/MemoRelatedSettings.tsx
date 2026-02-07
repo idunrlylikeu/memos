@@ -92,6 +92,13 @@ const MemoRelatedSettings = () => {
           />
         </SettingRow>
 
+        <SettingRow label={t("setting.system-section.enable-custom-memo-date")}>
+          <Switch
+            checked={memoRelatedSetting.enableCustomMemoDate ?? false}
+            onCheckedChange={(checked) => updatePartialSetting({ enableCustomMemoDate: checked })}
+          />
+        </SettingRow>
+
         <SettingRow label={t("setting.memo-related-settings.content-length-limit")}>
           <Input
             className="w-24"

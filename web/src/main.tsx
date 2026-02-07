@@ -71,7 +71,7 @@ function Main() {
             </ViewProvider>
           </AuthProvider>
         </InstanceProvider>
-        <ReactQueryDevtools initialIsOpen={false} />
+        {/* <ReactQueryDevtools initialIsOpen={false} /> */}
       </QueryClientProvider>
     </ErrorBoundary>
   );

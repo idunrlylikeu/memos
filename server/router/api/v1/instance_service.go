@@ -252,6 +252,7 @@ func convertInstanceMemoRelatedSettingFromStore(setting *storepb.InstanceMemoRel
 		DisplayWithUpdateTime:    setting.DisplayWithUpdateTime,
 		ContentLengthLimit:       setting.ContentLengthLimit,
 		EnableDoubleClickEdit:    setting.EnableDoubleClickEdit,
+		EnableCustomMemoDate:     setting.EnableCustomMemoDate,
 		Reactions:                setting.Reactions,
 	}
 }
@@ -265,6 +266,7 @@ func convertInstanceMemoRelatedSettingToStore(setting *v1pb.InstanceSetting_Memo
 		DisplayWithUpdateTime:    setting.DisplayWithUpdateTime,
 		ContentLengthLimit:       setting.ContentLengthLimit,
 		EnableDoubleClickEdit:    setting.EnableDoubleClickEdit,
+		EnableCustomMemoDate:     setting.EnableCustomMemoDate,
 		Reactions:                setting.Reactions,
 	}
 }

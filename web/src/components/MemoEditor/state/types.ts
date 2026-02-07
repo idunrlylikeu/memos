@@ -41,6 +41,7 @@ export type EditorAction =
   | { type: "ADD_LOCAL_FILE"; payload: LocalFile }
   | { type: "REMOVE_LOCAL_FILE"; payload: string }
   | { type: "CLEAR_LOCAL_FILES" }
+  | { type: "SET_TIMESTAMPS"; payload: Partial<EditorState["timestamps"]> }
   | { type: "TOGGLE_FOCUS_MODE" }
   | { type: "SET_LOADING"; payload: { key: LoadingKey; value: boolean } }
   | { type: "SET_DRAGGING"; payload: boolean }

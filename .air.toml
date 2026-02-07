@@ -10,24 +10,6 @@ tmp_dir = "tmp"
   # Binary name to run
   bin = "tmp/memos"
 
-  # Watch these file extensions
-  include_ext = ["go", "tpl", "tmpl", "html", "yaml", "yml"]
-
-  # Ignore these file extensions
-  exclude_ext = ["tmp"]
-
-  # Watch these directories
-  include_dir = []
-
-  # Ignore these directories
-  exclude_dir = ["web", "tmp", "vendor", "node_modules", "dist", "server/router/frontend/dist"]
-
-  # Watch these files
-  include_file = []
-
-  # Ignore these files
-  exclude_file = []
-
   # Delay before starting build
   delay = 1000
 
@@ -39,6 +21,32 @@ tmp_dir = "tmp"
 
   # Delay before sending interrupt
   kill_delay = 0
+
+
+[watch]
+  # Watch these file extensions
+  include_ext = ["go", "tpl", "tmpl", "html", "yaml", "yml"]
+
+  # Ignore these file extensions
+  exclude_ext = ["tmp"]
+
+  # Watch these directories (empty = watch all except excluded)
+  include_dir = []
+
+  # Ignore these directories
+  exclude_dir = ["web", "tmp", "vendor", "node_modules", "dist", "server/router/frontend/dist"]
+
+  # Watch these files
+  include_file = []
+
+  # Ignore these files
+  exclude_file = []
+
+  # Use polling for file changes (required for Docker volumes)
+  poll = true
+
+  # Poll interval in milliseconds (check for changes every 500ms)
+  poll_interval = 10000
 
 [log]
   # Show log time

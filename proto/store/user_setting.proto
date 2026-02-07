@@ -41,6 +41,8 @@ message GeneralUserSetting {
   // The user's theme preference.
   // This references a CSS file in the web/public/themes/ directory.
   string theme = 3;
+  // Enable custom date/time when creating memos.
+  bool enable_custom_memo_date = 4;
 }
 
 message RefreshTokensUserSetting {

@@ -26,14 +26,21 @@ var (
 		Short: `An open source, lightweight note-taking service. Easily capture and share your great thoughts.`,
 		Run: func(_ *cobra.Command, _ []string) {
 			instanceProfile := &profile.Profile{
-				Demo:        viper.GetBool("demo"),
-				Addr:        viper.GetString("addr"),
-				Port:        viper.GetInt("port"),
-				UNIXSock:    viper.GetString("unix-sock"),
-				Data:        viper.GetString("data"),
-				Driver:      viper.GetString("driver"),
-				DSN:         viper.GetString("dsn"),
-				InstanceURL: viper.GetString("instance-url"),
+				Demo:             viper.GetBool("demo"),
+				Addr:             viper.GetString("addr"),
+				Port:             viper.GetInt("port"),
+				UNIXSock:         viper.GetString("unix-sock"),
+				Data:             viper.GetString("data"),
+				Driver:           viper.GetString("driver"),
+				DSN:              viper.GetString("dsn"),
+				InstanceURL:      viper.GetString("instance-url"),
+				OpenRouterAPIKey: os.Getenv("OPENROUTER_API_KEY"),
+				AIModel:          func() string {
+					if m := os.Getenv("AI_MODEL"); m != "" {
+						return m
+					}
+					return "stepfun/step-3.5-flash:free"
+				}(),
 			}
 			instanceProfile.Version = version.GetCurrentVersion()
 

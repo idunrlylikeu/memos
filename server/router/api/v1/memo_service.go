@@ -140,6 +140,14 @@ func (s *APIV1Service) CreateMemo(ctx context.Context, request *v1pb.CreateMemoR
 	if err := s.DispatchMemoCreatedWebhook(ctx, memoMessage); err != nil {
 		slog.Warn("Failed to dispatch memo created webhook", slog.Any("err", err))
 	}
+	
+	if s.VectorStore != nil {
+		go func(creatorID int32, uid, content string) {
+			if err := s.VectorStore.UpsertMemo(context.Background(), creatorID, uid, content, ""); err != nil {
+				slog.Warn("Failed to upsert memo to vectorstore", slog.Any("err", err))
+			}
+		}(memo.CreatorID, memo.UID, memo.Content)
+	}
 
 	return memoMessage, nil
 }
@@ -469,6 +477,14 @@ func (s *APIV1Service) UpdateMemo(ctx context.Context, request *v1pb.UpdateMemoR
 	// Try to dispatch webhook when memo is updated.
 	if err := s.DispatchMemoUpdatedWebhook(ctx, memoMessage); err != nil {
 		slog.Warn("Failed to dispatch memo updated webhook", slog.Any("err", err))
+	}
+
+	if s.VectorStore != nil && update.Content != nil {
+		go func(creatorID int32, uid, content string) {
+			if err := s.VectorStore.UpsertMemo(context.Background(), creatorID, uid, content, ""); err != nil {
+				slog.Warn("Failed to upsert memo to vectorstore", slog.Any("err", err))
+			}
+		}(memo.CreatorID, memo.UID, *update.Content)
 	}
 
 	return memoMessage, nil

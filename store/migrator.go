@@ -136,6 +136,15 @@ func (s *Store) Migrate(ctx context.Context) error {
 		}
 	}
 
+	// Ensure AI chat tables exist (CREATE IF NOT EXISTS — safe for new and existing DBs).
+	if sqliteDriver, ok := s.driver.(interface {
+		EnsureAIChatTables(ctx context.Context) error
+	}); ok {
+		if err := sqliteDriver.EnsureAIChatTables(ctx); err != nil {
+			return errors.Wrap(err, "failed to ensure AI chat tables")
+		}
+	}
+
 	return nil
 }
 

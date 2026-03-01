@@ -67,4 +67,16 @@ type Driver interface {
 	ListReactions(ctx context.Context, find *FindReaction) ([]*Reaction, error)
 	GetReaction(ctx context.Context, find *FindReaction) (*Reaction, error)
 	DeleteReaction(ctx context.Context, delete *DeleteReaction) error
+
+	// AIChatSession model related methods.
+	CreateAIChatSession(ctx context.Context, create *AIChatSession) (*AIChatSession, error)
+	ListAIChatSessions(ctx context.Context, find *FindAIChatSession) ([]*AIChatSession, error)
+	GetAIChatSession(ctx context.Context, find *FindAIChatSession) (*AIChatSession, error)
+	UpdateAIChatSession(ctx context.Context, update *UpdateAIChatSession) (*AIChatSession, error)
+	DeleteAIChatSession(ctx context.Context, uid string) error
+
+	// AIChatMessage model related methods.
+	CreateAIChatMessage(ctx context.Context, create *CreateAIChatMessage) (*AIChatMessage, error)
+	ListAIChatMessages(ctx context.Context, find *FindAIChatMessage) ([]*AIChatMessage, error)
+	DeleteAIChatMessages(ctx context.Context, sessionID int32) error
 }

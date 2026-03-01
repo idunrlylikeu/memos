@@ -18,6 +18,7 @@ const Setting = lazy(() => import("@/pages/Setting"));
 const SignIn = lazy(() => import("@/pages/SignIn"));
 const SignUp = lazy(() => import("@/pages/SignUp"));
 const UserProfile = lazy(() => import("@/pages/UserProfile"));
+const Chat = lazy(() => import("@/pages/Chat"));
 
 import { ROUTES } from "./routes";
 
@@ -55,6 +56,8 @@ const router = createBrowserRouter([
           { path: Routes.ATTACHMENTS, element: <Attachments /> },
           { path: Routes.INBOX, element: <Inboxes /> },
           { path: Routes.SETTING, element: <Setting /> },
+          { path: Routes.CHAT, element: <Chat /> },
+          { path: `${Routes.CHAT}/:uid`, element: <Chat /> },
           { path: "memos/:uid", element: <MemoDetail /> },
           { path: "403", element: <PermissionDenied /> },
           { path: "404", element: <NotFound /> },

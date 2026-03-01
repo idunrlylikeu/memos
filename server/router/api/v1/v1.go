@@ -12,6 +12,7 @@ import (
 
 	"github.com/usememos/memos/internal/profile"
 	"github.com/usememos/memos/plugin/markdown"
+	"github.com/usememos/memos/plugin/vectorstore"
 	v1pb "github.com/usememos/memos/proto/gen/api/v1"
 	"github.com/usememos/memos/server/auth"
 	"github.com/usememos/memos/store"
@@ -31,12 +32,13 @@ type APIV1Service struct {
 	Profile         *profile.Profile
 	Store           *store.Store
 	MarkdownService markdown.Service
+	VectorStore     *vectorstore.Store
 
 	// thumbnailSemaphore limits concurrent thumbnail generation to prevent memory exhaustion
 	thumbnailSemaphore *semaphore.Weighted
 }
 
-func NewAPIV1Service(secret string, profile *profile.Profile, store *store.Store) *APIV1Service {
+func NewAPIV1Service(secret string, profile *profile.Profile, store *store.Store, vs *vectorstore.Store) *APIV1Service {
 	markdownService := markdown.NewService(
 		markdown.WithTagExtension(),
 	)
@@ -45,6 +47,7 @@ func NewAPIV1Service(secret string, profile *profile.Profile, store *store.Store
 		Profile:            profile,
 		Store:              store,
 		MarkdownService:    markdownService,
+		VectorStore:        vs,
 		thumbnailSemaphore: semaphore.NewWeighted(3), // Limit to 3 concurrent thumbnail generations
 	}
 }
@@ -143,6 +146,9 @@ func (s *APIV1Service) RegisterGateway(ctx context.Context, echoServer *echo.Ech
 	})
 	connectGroup := echoServer.Group("", corsHandler)
 	connectGroup.Any("/memos.api.v1.*", echo.WrapHandler(connectMux))
+
+	// AI chat routes (plain Echo, not gRPC)
+	s.registerAIChatRoutes(echoServer)
 
 	return nil
 }

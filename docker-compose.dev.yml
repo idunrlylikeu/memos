@@ -24,6 +24,8 @@ services:
     working_dir: /app
     environment:
       - MEMOS_PORT=8081
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - AI_MODEL=${AI_MODEL}
 
   frontend:
     build:

@@ -9,12 +9,14 @@ import (
 	"runtime"
 	"time"
 
+	chromem "github.com/philippgille/chromem-go"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/pkg/errors"
 
 	"github.com/usememos/memos/internal/profile"
+	"github.com/usememos/memos/plugin/vectorstore"
 	storepb "github.com/usememos/memos/proto/gen/store"
 	apiv1 "github.com/usememos/memos/server/router/api/v1"
 	"github.com/usememos/memos/server/router/fileserver"
@@ -35,9 +37,9 @@ type Server struct {
 	runnerCancelFuncs []context.CancelFunc
 }
 
-func NewServer(ctx context.Context, profile *profile.Profile, store *store.Store) (*Server, error) {
+func NewServer(ctx context.Context, profile *profile.Profile, dbStore *store.Store) (*Server, error) {
 	s := &Server{
-		Store:   store,
+		Store:   dbStore,
 		Profile: profile,
 	}
 
@@ -62,11 +64,42 @@ func NewServer(ctx context.Context, profile *profile.Profile, store *store.Store
 	})
 
 	// Serve frontend static files.
-	frontend.NewFrontendService(profile, store).Serve(ctx, echoServer)
+	frontend.NewFrontendService(profile, dbStore).Serve(ctx, echoServer)
 
 	rootGroup := echoServer.Group("")
 
-	apiV1Service := apiv1.NewAPIV1Service(s.Secret, profile, store)
+	// Initialise vector store (nil if API key not set — AI chat will be disabled).
+	var vs *vectorstore.Store
+	if profile.OpenRouterAPIKey != "" {
+		embedFn := chromem.NewEmbeddingFuncOpenAICompat(
+			"https://openrouter.ai/api/v1",
+			profile.OpenRouterAPIKey,
+			"qwen/qwen3-embedding-8b", // small, cheap, widely supported on OpenRouter
+			nil,
+		)
+		var err error
+		vs, err = vectorstore.New(profile.Data, embedFn)
+		if err != nil {
+			slog.Warn("failed to init vector store, AI memo search disabled", "err", err)
+			vs = nil
+		} else {
+			// Seed vector DB from existing memos in the background.
+			go func() {
+				memos, err := dbStore.ListMemos(context.Background(), &store.FindMemo{})
+				if err != nil {
+					slog.Warn("failed to list memos for vectorstore seeding", "err", err)
+					return
+				}
+				for _, m := range memos {
+					// UpsertMemo ignores if the document ID already exists.
+					_ = vs.UpsertMemo(context.Background(), m.CreatorID, m.UID, m.Content, "")
+				}
+				slog.Info("vectorstore seeding checked for existing memos")
+			}()
+		}
+	}
+
+	apiV1Service := apiv1.NewAPIV1Service(s.Secret, profile, dbStore, vs)
 
 	// Register HTTP file server routes BEFORE gRPC-Gateway to ensure proper range request handling for Safari.
 	// This uses native HTTP serving (http.ServeContent) instead of gRPC for video/audio files.

@@ -32,6 +32,12 @@ type Profile struct {
 	Version string
 	// InstanceURL is the url of your memos instance.
 	InstanceURL string
+	// OpenRouterAPIKey is the API key for OpenRouter (AI proxy).
+	// Loaded from env OPENROUTER_API_KEY.
+	OpenRouterAPIKey string
+	// AIModel is the OpenRouter model to use (e.g. "openai/gpt-4o-mini").
+	// Loaded from env AI_MODEL; defaults to "openai/gpt-4o-mini".
+	AIModel string
 }
 
 func checkDataDir(dataDir string) (string, error) {

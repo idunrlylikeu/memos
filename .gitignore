@@ -31,3 +31,4 @@ web/package-lock.json
 memos_prod.db
 memos_prod.db-shm
 memos_prod.db-wal
+*.gob

@@ -1082,3 +1082,24 @@ Controls whether the public sign-up page accepts new accounts.
 - `server/router/api/v1/auth_service.go` — `SignIn` (SSO auto-registration check)
 - `web/src/components/Settings/InstanceSection.tsx` — admin toggle
 - `web/src/pages/SignUp.tsx` — public registration form (respects setting)
+
+---
+
+### Markdown Toolbar & Preview Mode
+
+A formatting toolbar and raw/preview toggle in the memo editor that help users write markdown without memorising syntax.
+
+**Toolbar** — a row of icon buttons (bold, italic, strikethrough, inline code, H1–H3, blockquote, HR, bullet list, numbered list, task item, link) rendered above the textarea. Buttons wrap the selected text with the relevant markdown syntax, or insert a placeholder when nothing is selected. Uses `onMouseDown` + `preventDefault` to avoid stealing textarea focus, so it works correctly on touch devices as well.
+
+**Preview toggle** — an eye/pencil icon button in the main editor toolbar (`InsertMenu` row). Switches the editor from the raw textarea to a fully-rendered `MemoContent` view of the current draft. The markdown formatting toolbar is hidden while in preview mode.
+
+**State:** `isPreviewMode: boolean` lives in `EditorState.ui` (managed by `TOGGLE_PREVIEW_MODE` reducer action); no server-side changes required.
+
+**Key files:**
+- `web/src/components/MemoEditor/state/types.ts` — `isPreviewMode` in `EditorState.ui` + `TOGGLE_PREVIEW_MODE` action
+- `web/src/components/MemoEditor/state/actions.ts` — `togglePreviewMode` action creator
+- `web/src/components/MemoEditor/Toolbar/MarkdownToolbar.tsx` — formatting button row
+- `web/src/components/MemoEditor/Toolbar/PreviewModeToggle.tsx` — eye/pencil toggle button
+- `web/src/components/MemoEditor/components/EditorContent.tsx` — renders toolbar + switches editor/preview
+- `web/src/components/MemoEditor/components/EditorToolbar.tsx` — hosts the `PreviewModeToggle`
+

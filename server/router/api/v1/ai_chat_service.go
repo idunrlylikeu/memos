@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/lithammer/shortuuid/v4"
 	"github.com/tmc/langchaingo/tools"
+	"github.com/tmc/langchaingo/tools/duckduckgo"
 
 	"github.com/usememos/memos/plugin/vectorstore"
 	"github.com/usememos/memos/server/auth"
@@ -35,7 +38,7 @@ const (
 	keepRecentMessages = 10
 
 	// maxAgentRounds caps the number of tool-use iterations per request.
-	maxAgentRounds = 6
+	maxAgentRounds = 12
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -299,19 +302,27 @@ func (s *APIV1Service) handleAIChat(c *echo.Context) error {
 
 	// Build our tool registry (same tools as before, but now dispatched natively)
 	toolRegistry := map[string]tools.Tool{
-		"search_memos":       newSearchMemosTool(s.VectorStore, user.ID, req.TagFilter),
-		"query_memos":        newQueryMemosTool(s.Store, user.ID),
-		"create_memo":        newCreateMemoTool(s.Store, user.ID),
-		"append_to_memo":     newAppendToMemoTool(s.Store, user.ID),
-		"update_memo":        newUpdateMemoTool(s.Store, user.ID),
-		"update_memo_tags":   newUpdateMemoTagsTool(s.Store, user.ID),
-		"delete_memo":        newDeleteMemoTool(s.Store, user.ID),
-		"get_user_stats":     newGetUserStatsTool(s.Store, user.ID),
-		"list_memos_by_tag":  newListMemosByTagTool(s.Store, user.ID),
+		"search_internet":   &ddgToolAdapter{},
+		"scrape_url":        &scraperToolAdapter{},
+		"search_memos":      newSearchMemosTool(s.VectorStore, user.ID, req.TagFilter),
+		"query_memos":       newQueryMemosTool(s.Store, user.ID),
+		"create_memo":       newCreateMemoTool(s.Store, user.ID),
+		"append_to_memo":    newAppendToMemoTool(s.Store, user.ID),
+		"update_memo":       newUpdateMemoTool(s.Store, user.ID),
+		"update_memo_tags":  newUpdateMemoTagsTool(s.Store, user.ID),
+		"delete_memo":       newDeleteMemoTool(s.Store, user.ID),
+		"get_user_stats":    newGetUserStatsTool(s.Store, user.ID),
+		"list_memos_by_tag": newListMemosByTagTool(s.Store, user.ID),
 	}
 
 	// Tool schema definitions sent to the LLM
 	toolDefs := []map[string]any{
+		buildToolDef("search_internet", "Search the internet for current events, facts, or information using DuckDuckGo.", map[string]any{
+			"query": map[string]any{"type": "string", "description": "The internet search query"},
+		}, []string{"query"}),
+		buildToolDef("scrape_url", "Scrape text content from a specific web URL.", map[string]any{
+			"url": map[string]any{"type": "string", "description": "The exact URL to scrape"},
+		}, []string{"url"}),
 		buildToolDef("search_memos", "Search the user's notes semantically for a concept or topic. Use for general/conceptual questions.", map[string]any{
 			"query": map[string]any{"type": "string", "description": "The search query"},
 		}, []string{"query"}),
@@ -388,8 +399,8 @@ func (s *APIV1Service) handleAIChat(c *echo.Context) error {
 		var apiResp struct {
 			Choices []struct {
 				Message struct {
-					Role      string          `json:"role"`
-					Content   string          `json:"content"`
+					Role      string `json:"role"`
+					Content   string `json:"content"`
 					ToolCalls []struct {
 						ID       string `json:"id"`
 						Type     string `json:"type"`
@@ -412,7 +423,12 @@ func (s *APIV1Service) handleAIChat(c *echo.Context) error {
 
 		// No tool calls → final text answer
 		if len(msg.ToolCalls) == 0 {
-			finalAnswer = msg.Content
+			if msg.Content == "" {
+				slog.Warn("[AGENT EMPTY RESPONSE]", "round", round)
+				finalAnswer = "I'm sorry, I was unable to generate a response. The tool execution or website scrape might have failed or timed out."
+			} else {
+				finalAnswer = msg.Content
+			}
 			slog.Info("[AGENT FINISH]", "answer", finalAnswer)
 			break
 		}
@@ -427,14 +443,34 @@ func (s *APIV1Service) handleAIChat(c *echo.Context) error {
 
 		// Execute each tool call and append results
 		// Deduplicate calls — some models repeat the same tool_call_id in one response
+		// Deduplicate by both call-ID and by name+args fingerprint.
+		// Some models emit the same logical call twice with different IDs.
 		seenCallIDs := make(map[string]bool)
+		seenFingerprints := make(map[string]bool)
 		for _, tc := range msg.ToolCalls {
+			toolName := tc.Function.Name
+			toolInput := tc.Function.Arguments
+
 			if seenCallIDs[tc.ID] {
+				slog.Warn("[AGENT DEDUP] skipping duplicate tool_call_id", "id", tc.ID)
+				messages = append(messages, map[string]any{
+					"role": "tool", "tool_call_id": tc.ID,
+					"content": "Duplicate call skipped.",
+				})
 				continue
 			}
 			seenCallIDs[tc.ID] = true
-			toolName := tc.Function.Name
-			toolInput := tc.Function.Arguments
+
+			fingerprint := toolName + "|" + toolInput
+			if seenFingerprints[fingerprint] {
+				slog.Warn("[AGENT DEDUP] skipping identical tool call", "tool", toolName)
+				messages = append(messages, map[string]any{
+					"role": "tool", "tool_call_id": tc.ID,
+					"content": "Duplicate call skipped — this exact tool+input was already executed this round.",
+				})
+				continue
+			}
+			seenFingerprints[fingerprint] = true
 
 			slog.Info("[AGENT TOOL CALL]", "tool", toolName, "input", toolInput)
 			emitJSON("tool_call", map[string]string{"name": toolName, "input": toolInput})
@@ -458,6 +494,10 @@ func (s *APIV1Service) handleAIChat(c *echo.Context) error {
 		}
 	}
 
+	if finalAnswer == "" {
+		slog.Warn("[AGENT MAX ROUNDS EXCEEDED]", "rounds", maxAgentRounds)
+		finalAnswer = "I'm sorry, I was unable to compile a final answer because my tools encountered too many errors or the limit for searching was reached."
+	}
 	slog.Info("[AGENT RAW RESULT]", "answer", finalAnswer)
 
 	if finalAnswer != "" {
@@ -641,7 +681,16 @@ func (t *searchMemosTool) Call(ctx context.Context, input string) (string, error
 	if t.vs == nil {
 		return "Vector store not available.", nil
 	}
-	results, err := t.vs.SearchSimilar(ctx, t.userID, input, 5)
+	// The LLM sends JSON like {"query": "..."} — extract the actual query string.
+	query := input
+	var payload struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(input), &payload); err == nil && payload.Query != "" {
+		query = payload.Query
+	}
+	slog.Info("[SEARCH MEMOS]", "query", query)
+	results, err := t.vs.SearchSimilar(ctx, t.userID, query, 5)
 	if err != nil {
 		return "", err
 	}
@@ -685,7 +734,7 @@ func (t *updateMemoTool) Call(ctx context.Context, input string) (string, error)
 	if err := json.Unmarshal([]byte(input), &payload); err != nil {
 		return "Error: failed to parse input JSON.", nil
 	}
-	
+
 	m, err := t.store.GetMemo(ctx, &store.FindMemo{UID: &payload.UID})
 	if err != nil || m == nil {
 		return "Error: note not found.", nil
@@ -729,7 +778,7 @@ func (t *createMemoTool) Call(ctx context.Context, input string) (string, error)
 	if err := json.Unmarshal([]byte(input), &payload); err != nil {
 		return "Error: failed to parse input JSON.", nil
 	}
-	
+
 	// Use the same shortuuid format that Memos uses for all memo UIDs
 	uid := shortuuid.New()
 	_, err := t.store.CreateMemo(ctx, &store.Memo{
@@ -770,7 +819,7 @@ func (t *appendToMemoTool) Call(ctx context.Context, input string) (string, erro
 	if err := json.Unmarshal([]byte(input), &payload); err != nil {
 		return "Error: failed to parse input JSON.", nil
 	}
-	
+
 	m, err := t.store.GetMemo(ctx, &store.FindMemo{UID: &payload.UID})
 	if err != nil || m == nil {
 		return "Error: note not found.", nil
@@ -816,7 +865,7 @@ func (t *updateMemoTagsTool) Call(ctx context.Context, input string) (string, er
 	if err := json.Unmarshal([]byte(input), &payload); err != nil {
 		return "Error: failed to parse input JSON.", nil
 	}
-	
+
 	m, err := t.store.GetMemo(ctx, &store.FindMemo{UID: &payload.UID})
 	if err != nil || m == nil {
 		return "Error: note not found.", nil
@@ -861,7 +910,7 @@ func (t *deleteMemoTool) Call(ctx context.Context, input string) (string, error)
 	if err := json.Unmarshal([]byte(input), &payload); err != nil {
 		return "Error: failed to parse input JSON.", nil
 	}
-	
+
 	m, err := t.store.GetMemo(ctx, &store.FindMemo{UID: &payload.UID})
 	if err != nil || m == nil {
 		return "Error: note not found.", nil
@@ -898,14 +947,14 @@ func (t *getUserStatsTool) Call(ctx context.Context, input string) (string, erro
 	slog.Info("[AGENT TOOL CALL]", "tool", t.Name(), "input", input)
 	state := store.Normal
 	memos, err := t.store.ListMemos(ctx, &store.FindMemo{
-		CreatorID: &t.userID,
-		RowStatus: &state,
+		CreatorID:      &t.userID,
+		RowStatus:      &state,
 		ExcludeContent: true,
 	})
 	if err != nil {
 		return "Error retrieving stats: " + err.Error(), nil
 	}
-	
+
 	return fmt.Sprintf("User Statistics:\nTotal Active Memos: %d", len(memos)), nil
 }
 
@@ -934,22 +983,22 @@ func (t *listMemosByTagTool) Call(ctx context.Context, input string) (string, er
 	if err := json.Unmarshal([]byte(input), &payload); err != nil {
 		return "Error: failed to parse input JSON.", nil
 	}
-	
+
 	find := &store.FindMemo{
-		CreatorID: &t.userID,
+		CreatorID:       &t.userID,
 		ExcludeComments: true,
 	}
 	find.Filters = append(find.Filters, fmt.Sprintf("content.contains('%s')", strings.ReplaceAll(payload.Tag, "'", "\\'")))
-	
+
 	memos, err := t.store.ListMemos(ctx, find)
 	if err != nil {
 		return "Error searching tags: " + err.Error(), nil
 	}
-	
+
 	if len(memos) == 0 {
 		return fmt.Sprintf("No notes found with the tag %s.", payload.Tag), nil
 	}
-	
+
 	var sb strings.Builder
 	for i, r := range memos {
 		if i >= 10 {
@@ -1007,7 +1056,7 @@ func (t *queryMemosTool) Call(ctx context.Context, input string) (string, error)
 		// CEL engine wrapper for standard text matching
 		find.Filters = append(find.Filters, fmt.Sprintf("content.contains('%s')", strings.ReplaceAll(payload.TextSearch, "'", "\\'")))
 	}
-	
+
 	if payload.DateStart != "" {
 		parsed, err := time.Parse("2006-01-02", payload.DateStart)
 		if err == nil {
@@ -1030,7 +1079,7 @@ func (t *queryMemosTool) Call(ctx context.Context, input string) (string, error)
 	if len(memos) == 0 {
 		return "No notes found matching those criteria.", nil
 	}
-	
+
 	var sb strings.Builder
 	for i, r := range memos {
 		if i >= 5 {
@@ -1041,10 +1090,10 @@ func (t *queryMemosTool) Call(ctx context.Context, input string) (string, error)
 		if len(preview) > 400 {
 			preview = preview[:400] + "..."
 		}
-		sb.WriteString(fmt.Sprintf("[%d] Note %s (Created: %s):\n%s\n\n", 
-			i+1, 
-			r.UID, 
-			time.Unix(r.CreatedTs, 0).Format("2006-01-02 15:04"), 
+		sb.WriteString(fmt.Sprintf("[%d] Note %s (Created: %s):\n%s\n\n",
+			i+1,
+			r.UID,
+			time.Unix(r.CreatedTs, 0).Format("2006-01-02 15:04"),
 			preview,
 		))
 	}
@@ -1066,7 +1115,13 @@ CRITICAL INSTRUCTIONS:
 2. For questions about a SPECIFIC DATE or exact keyword, YOU MUST use "query_memos". This is mandatory.
 3. For general conceptual questions, use "search_memos".
 4. To create, append, tag, or delete notes, use the respective tools.
-5. NEVER hallucinate note content. If a tool returns no results, tell the user exactly that.`,
+5. NEVER hallucinate note content. If a tool returns no results, tell the user exactly that.
+
+INTERNET SEARCH RULES (search_internet + scrape_url):
+- NEVER use advanced operators like "site:", "inurl:", "filetype:" — they trigger bot detection and get blocked.
+- The search result includes a Title, Description, and URL for each result. The Description snippet often contains enough information to answer the question without scraping.
+- Only call scrape_url if you genuinely need the full article text. If a scrape returns an error, move on — DO NOT retry the same URL.
+- If multiple scrapes fail, synthesize your answer from the search result snippets and descriptions you already have. Do not keep trying new searches for the same information.`,
 		now.Format("2006-01-02 15:04:05"),
 	)
 	if summary != "" {
@@ -1074,7 +1129,6 @@ CRITICAL INSTRUCTIONS:
 	}
 	return base
 }
-
 
 // buildToolDef constructs an OpenAI-compatible tool definition map.
 func buildToolDef(name, description string, properties map[string]any, required []string) map[string]any {
@@ -1091,7 +1145,6 @@ func buildToolDef(name, description string, properties map[string]any, required 
 		},
 	}
 }
-
 
 // callLLM makes a simple single-turn chat completion request to OpenRouter.
 func (s *APIV1Service) callLLM(ctx context.Context, prompt string) (string, error) {
@@ -1135,6 +1188,200 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// decodeDDGURLs replaces DuckDuckGo redirect URLs in a block of text with the
+// actual destination URLs. langchaingo currently only strips the
+// "/l/?kh=-1&uddg=" prefix, but DDG now uses "/l/?uddg=...&rut=..." (no kh=-1).
+// This post-processes the raw result text from the DDG tool so the LLM always
+// sees clean, direct URLs.
+func decodeDDGURLs(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "duckduckgo.com/l/") {
+			continue
+		}
+		// Normalise protocol-relative URLs so url.Parse works.
+		raw := line
+		if strings.HasPrefix(raw, "URL: //") {
+			raw = "URL: https:" + raw[5:]
+		}
+		// Extract just the URL part after "URL: "
+		urlPart := strings.TrimPrefix(raw, "URL: ")
+		if strings.HasPrefix(urlPart, "URL:") {
+			// no space variant – skip
+			continue
+		}
+		if u, err := url.Parse(strings.TrimSpace(urlPart)); err == nil {
+			if target := u.Query().Get("uddg"); target != "" {
+				// Replace url-encoded target back to plain text
+				if decoded, err2 := url.QueryUnescape(target); err2 == nil {
+					lines[i] = "URL: " + decoded
+				} else {
+					lines[i] = "URL: " + target
+				}
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// stripTagContent removes all occurrences of <tagName ...>...</tagName> from s,
+// including the content between the tags. Case-insensitive. Used to drop
+// <script> and <style> blocks before extracting visible page text.
+func stripTagContent(s, tagName string) string {
+	tag := strings.ToLower(tagName)
+	lower := strings.ToLower(s)
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		// Find opening tag
+		open := "<" + tag
+		start := strings.Index(lower[i:], open)
+		if start == -1 {
+			out.WriteString(s[i:])
+			break
+		}
+		// Write everything before this tag
+		out.WriteString(s[i : i+start])
+		// Find the closing tag
+		closeTag := "</" + tag + ">"
+		end := strings.Index(lower[i+start:], closeTag)
+		if end == -1 {
+			// No closing tag – skip to end
+			break
+		}
+		// Skip past the close tag
+		i = i + start + end + len(closeTag)
+	}
+	return out.String()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internet Tool Adapters
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ddgToolAdapter wraps DuckDuckGo search. A fresh duckduckgo.Tool (and thus a
+// fresh http.Client) is created on every Call so consecutive searches within
+// the same agent loop don't share TCP connections or cookies that DDG uses to
+// detect automated traffic.
+type ddgToolAdapter struct{}
+
+func (t *ddgToolAdapter) Name() string        { return "search_internet" }
+func (t *ddgToolAdapter) Description() string { return "" }
+func (t *ddgToolAdapter) Call(ctx context.Context, input string) (string, error) {
+	var payload struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(input), &payload); err == nil && payload.Query != "" {
+		input = payload.Query
+	}
+
+	// Fresh client per call — avoids sharing session state across searches.
+	freshDDG, err := duckduckgo.New(5, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+		duckduckgo.WithHTTPClient(&http.Client{
+			Transport: &http.Transport{},
+			Timeout:   12 * time.Second,
+		}),
+	)
+	if err != nil {
+		return "Search unavailable: " + err.Error(), nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+
+	result, err := freshDDG.Call(ctx, input)
+	if err != nil {
+		// Truncate so CAPTCHA/HTML pages don't flood the LLM context.
+		msg := err.Error()
+		if len(msg) > 200 {
+			msg = msg[:200] + "... [response truncated]"
+		}
+		return "Search temporarily failed (try a simpler query): " + msg, nil
+	}
+
+	// langchaingo strips "/l/?kh=-1&uddg=" but DDG now uses "/l/?uddg=...&rut=..."
+	// Post-process any remaining wrapped URLs to real URLs.
+	result = decodeDDGURLs(result)
+	return result, nil
+}
+
+type scraperToolAdapter struct{}
+
+func (t *scraperToolAdapter) Name() string        { return "scrape_url" }
+func (t *scraperToolAdapter) Description() string { return "" }
+func (t *scraperToolAdapter) Call(ctx context.Context, input string) (string, error) {
+	var payload struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(input), &payload); err == nil && payload.URL != "" {
+		input = payload.URL
+	}
+
+	// Unwrap any remaining DuckDuckGo redirect URLs.
+	if strings.Contains(input, "duckduckgo.com/l/") {
+		if strings.HasPrefix(input, "//") {
+			input = "https:" + input
+		}
+		if u, err := url.Parse(input); err == nil {
+			if target := u.Query().Get("uddg"); target != "" {
+				input = target
+			}
+		}
+	}
+
+	// Validate / normalise the target URL.
+	targetURL, err := url.Parse(strings.TrimSpace(input))
+	if err != nil || targetURL.Host == "" {
+		return "Error: invalid URL: " + input, nil
+	}
+	if targetURL.Scheme == "" {
+		targetURL.Scheme = "https"
+	}
+
+	// Use Jina Reader (free, no key) — returns clean markdown from any page,
+	// including JS-heavy sites that our plain HTTP scraper can't handle.
+	jinaURL := "https://r.jina.ai/" + targetURL.String()
+
+	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", jinaURL, nil)
+	if err != nil {
+		return "Error creating request: " + err.Error(), nil
+	}
+	req.Header.Set("Accept", "text/plain")
+	// Ask Jina to skip images and links to keep the output compact.
+	req.Header.Set("X-Remove-Selector", "img, nav, footer, aside, .ads")
+	req.Header.Set("X-Return-Format", "text")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "Error: Timeout reading page via Jina. The site may be too slow. Use information already gathered.", nil
+		}
+		return "Error fetching via Jina: " + err.Error(), nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf("Error: Jina returned status %d for %s", resp.StatusCode, targetURL.String()), nil
+	}
+
+	// Read up to 50 KB then trim to 8000 chars for the LLM.
+	buf := make([]byte, 51200)
+	n, _ := io.ReadFull(resp.Body, buf)
+	text := strings.TrimSpace(string(buf[:n]))
+
+	if len(text) > 8000 {
+		text = text[:8000]
+	}
+	if len(text) < 80 {
+		return "Error: Jina returned no readable content for this page.", nil
+	}
+
+	return text, nil
 }
 
 // proxySSEFromOpenRouter is a helper for future true streaming from OpenRouter.

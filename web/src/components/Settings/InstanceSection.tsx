@@ -110,7 +110,10 @@ const InstanceSection = () => {
       </SettingGroup>
 
       <SettingGroup>
-        <SettingRow label={t("setting.instance-section.disallow-user-registration")}>
+        <SettingRow
+          label={t("setting.instance-section.disallow-user-registration")}
+          description="When enabled, only the initial system admin setup is allowed. All further public registration is blocked — admins can still create accounts from the Members settings."
+        >
           <Switch
             disabled={profile.demo}
             checked={instanceGeneralSetting.disallowUserRegistration}

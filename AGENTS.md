@@ -984,3 +984,101 @@ Each plugin has its own README with usage examples.
 - CORS enabled for all origins (configure for production)
 - Input validation at service layer
 - SQL injection prevention via parameterized queries
+
+## Custom Features
+
+### Custom Memo Date
+
+When enabled, users can set a custom display date for each memo instead of using the creation timestamp.
+
+**Setting Location:** Settings → Memo-Related → "Enable custom memo date"
+
+**Backend:** `EnableCustomMemoDate` bool field in `storepb.InstanceMemoRelatedSetting` and `v1pb.InstanceSetting_MemoRelatedSetting`.
+
+**Frontend:** Toggle in `web/src/components/Settings/MemoRelatedSettings.tsx`. Components that render memo timestamps check this flag (from `InstanceContext`) to decide whether to show the date picker.
+
+**Key files:**
+- `proto/gen/store/setting.pb.go` — `InstanceMemoRelatedSetting.EnableCustomMemoDate`
+- `server/router/api/v1/instance_service.go` — `convertInstanceMemoRelatedSettingFromStore` / `ToStore`
+- `web/src/components/Settings/MemoRelatedSettings.tsx` — UI toggle
+
+---
+
+### AI Chat
+
+An agentic AI assistant backed by OpenRouter that can search and manage the user's notes, browse the web, and answer questions.
+
+**Prerequisite:** Set the `OPENROUTER_API_KEY` environment variable and optionally `AI_MODEL` (defaults to a capable chat model).
+
+**Backend — `server/router/api/v1/ai_chat_service.go`:**
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/ai/sessions` | GET | List user's chat sessions |
+| `/api/v1/ai/sessions` | POST | Create new session |
+| `/api/v1/ai/sessions/:uid` | PATCH | Rename session |
+| `/api/v1/ai/sessions/:uid` | DELETE | Delete session |
+| `/api/v1/ai/sessions/:uid/messages` | GET | Load message history |
+| `/api/v1/ai/sessions/:uid/chat` | POST | Send message, receive SSE stream |
+
+All endpoints require authentication via `requireAuth()` (Bearer token or session cookie).
+
+**Agent Loop:**
+- Up to `maxAgentRounds = 12` tool-use iterations per request
+- Uses OpenRouter's native function-calling API (OpenAI-compatible `tools` field)
+- Streams the final answer word-by-word via SSE (`event: data`, `type: token`)
+- SSE event types: `token`, `tool_call`, `source`, `error`, `done`
+
+**Available Tools:**
+
+| Tool | Purpose |
+|------|---------|
+| `search_internet` | DuckDuckGo web search |
+| `scrape_url` | Web page text extraction |
+| `search_memos` | Semantic vector search over user's notes |
+| `query_memos` | Keyword / date-range memo search |
+| `create_memo` | Create a new note |
+| `append_to_memo` | Append text to an existing note |
+| `update_memo` | Overwrite an existing note |
+| `update_memo_tags` | Add hashtags to a note |
+| `delete_memo` | Permanently delete a note |
+| `get_user_stats` | Note statistics (total count, etc.) |
+| `list_memos_by_tag` | List notes filtered by a hashtag |
+
+**Context compaction:** When total message characters exceed `compactThreshold = 400,000`, older messages are summarised by the LLM and replaced with a summary stored in the session record.
+
+**Auto-titling:** On the first message of a "New Chat" session, a background goroutine generates a short title using the LLM.
+
+**Frontend — `web/src/pages/Chat.tsx`:**
+- Route: `/chat` and `/chat/:uid`
+- Requires authentication — unauthenticated users are redirected to `/auth`
+- Sidebar with session list (mobile: slide-in with dark overlay backdrop)
+- Input area uses `safe-area-inset-bottom` padding for iOS PWA / notch support
+- Markdown responses rendered via `MemoContent` component
+
+**Service client — `web/src/utils/aiService.ts`:**
+- All HTTP calls go through this utility (REST over `fetch`, not Connect RPC)
+- `listSessions()`, `createSession()`, `deleteSession()`, `loadMessages()`, `chat()` (async generator that yields SSE events)
+
+---
+
+### Web Registration Setting
+
+Controls whether the public sign-up page accepts new accounts.
+
+**Setting Location:** Settings → System → "Disallow user registration" toggle
+
+**Behavior:**
+- **OFF (default):** Anyone can register an account via `/auth/signup`
+- **ON:** The sign-up page shows "Sign up is not allowed." No new accounts can be created through the public form
+- **First-time setup exception:** Creating the very first account (the system admin) always succeeds, regardless of this setting. The bypass is enforced server-side in `CreateUser` via the `isFirstUser` check
+
+**Backend:** `DisallowUserRegistration` bool field in `storepb.InstanceGeneralSetting`. Enforced in `user_service.go:CreateUser` and `auth_service.go:SignIn` (for SSO auto-registration).
+
+**Frontend:** Toggle in `web/src/components/Settings/InstanceSection.tsx`. The `SignUp.tsx` page reads `instanceGeneralSetting.disallowUserRegistration` from `InstanceContext` to conditionally hide the form.
+
+**Key files:**
+- `server/router/api/v1/user_service.go` — `CreateUser` (enforcement + first-user bypass)
+- `server/router/api/v1/auth_service.go` — `SignIn` (SSO auto-registration check)
+- `web/src/components/Settings/InstanceSection.tsx` — admin toggle
+- `web/src/pages/SignUp.tsx` — public registration form (respects setting)

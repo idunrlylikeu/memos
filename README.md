@@ -55,6 +55,15 @@ An open-source, self-hosted note-taking tool. Capture thoughts instantly. Own th
 - **Total Data Ownership** — Self-hosted on your infrastructure. Notes stored in Markdown, always portable. Zero telemetry.
 - **Radical Simplicity** — Single Go binary, ~20MB Docker image. One command to deploy with SQLite, MySQL, or PostgreSQL.
 - **Open & Extensible** — MIT-licensed with full REST and gRPC APIs for integration.
+- **Privacy-First** — Self-hosted on your infrastructure with zero telemetry, no tracking, and no ads.
+- **Markdown Native** — Full markdown support with plain text storage. Your data is always portable.
+- **Lightweight** — Single Go binary with a React frontend. Low memory footprint, starts in seconds.
+- **Easy to Deploy** — One-line Docker install. Supports SQLite, MySQL, and PostgreSQL.
+- **Developer-Friendly** — Full REST and gRPC APIs for integration with existing workflows.
+- **Clean Interface** — Minimal design with dark mode and mobile-responsive layout.
+- **AI Chat Assistant** — Built-in agentic AI powered by OpenRouter. Searches and edits your notes, browses the web, and answers questions in a streaming chat interface.
+- **Custom Memo Date** — Optionally set a custom display date per memo instead of using the creation timestamp (enabled via instance settings).
+- **Registration Control** — Admins can restrict public sign-up so that only the initial system admin can be created via the web form; further accounts are created by the admin only.
 
 ## Quick Start
 

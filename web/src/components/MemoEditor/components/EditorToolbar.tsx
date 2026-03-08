@@ -6,6 +6,7 @@ import { useEditorContext } from "../state";
 import InsertMenu from "../Toolbar/InsertMenu";
 import MemoDatePicker from "./MemoDatePicker";
 import VisibilitySelector from "../Toolbar/VisibilitySelector";
+import AIActions from "../Toolbar/AIActions";
 import type { EditorToolbarProps } from "../types";
 
 export const EditorToolbar: FC<EditorToolbarProps> = ({ onSave, onCancel, memoName }) => {
@@ -37,6 +38,7 @@ export const EditorToolbar: FC<EditorToolbarProps> = ({ onSave, onCancel, memoNa
           onToggleFocusMode={handleToggleFocusMode}
           memoName={memoName}
         />
+        <AIActions />
         <MemoDatePicker />
       </div>
 

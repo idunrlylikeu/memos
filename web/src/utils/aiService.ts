@@ -109,5 +109,57 @@ export const aiService = {
         } finally {
             reader.releaseLock();
         }
+    },
+
+    async *streamCompletion(prompt: string, system: string = ""): AsyncGenerator<string, void, unknown> {
+        const res = await fetch(`/api/v1/ai/completions/stream`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt, system }),
+        });
+
+        if (!res.ok) {
+            throw new Error("Failed to start AI completion");
+        }
+
+        if (!res.body) {
+            throw new Error("No response body");
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        try {
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                while (buffer.includes("\n\n")) {
+                    const eventEndIndex = buffer.indexOf("\n\n");
+                    const eventLine = buffer.slice(0, eventEndIndex);
+                    buffer = buffer.slice(eventEndIndex + 2);
+
+                    if (eventLine.startsWith("data: ")) {
+                        const dataStr = eventLine.slice(6);
+                        if (dataStr === "[DONE]") {
+                            return;
+                        }
+                        try {
+                            const event: { type: string; content?: string } = JSON.parse(dataStr);
+                            if (event.type === "token" && event.content) {
+                                yield event.content;
+                            }
+                        } catch (e) {
+                            console.warn("Failed to parse SSE event", dataStr, e);
+                        }
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
     }
 };

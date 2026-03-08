@@ -1,7 +1,28 @@
 # Production Dockerfile for Backend
 # This builds the production binary with embedded frontend
-# Note: Frontend must be built first (run frontend Dockerfile.prod)
+# Multi-stage: frontend build -> backend build -> runtime
 
+# Stage 1: Build frontend
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app
+
+# Install pnpm
+RUN npm install -g pnpm@latest
+
+# Copy package files
+COPY web/package.json web/pnpm-lock.yaml ./
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source code
+COPY web/ .
+
+# Build for production
+RUN pnpm build
+
+# Stage 2: Build backend binary
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 WORKDIR /build
@@ -16,9 +37,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Copy pre-built frontend files (from frontend build)
-# These should be in server/router/frontend/dist
-COPY --from=frontend-build /app/dist ./server/router/frontend/dist
+# Copy pre-built frontend files from previous stage
+COPY --from=frontend-builder /app/dist ./server/router/frontend/dist
 
 # Build the binary
 ARG TARGETOS TARGETARCH VERSION COMMIT
@@ -46,8 +66,10 @@ WORKDIR /var/opt/memos
 # Copy binary
 COPY --from=builder /build/memos /usr/local/memos/memos
 
-# Copy entrypoint script
-COPY --chmod=755 scripts/entrypoint.sh /usr/local/memos/entrypoint.sh
+# Copy entrypoint script and convert line endings
+COPY scripts/entrypoint.sh /usr/local/memos/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/memos/entrypoint.sh && \
+    chmod +x /usr/local/memos/entrypoint.sh
 
 VOLUME /var/opt/memos
 

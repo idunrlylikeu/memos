@@ -1062,6 +1062,28 @@ All endpoints require authentication via `requireAuth()` (Bearer token or sessio
 
 ---
 
+### AI Format & Rewrite
+
+An assistant integrated into the Memo Editor toolbar that can format raw text to Markdown, or rewrite it to be clearer and more concise, without altering factual details. Uses the same underlying OpenRouter API setup as AI Chat.
+
+**Prerequisite:** Same as AI Chat. Requires `OPENROUTER_API_KEY` environment variable.
+
+**Backend — `server/router/api/v1/ai_chat_service.go`:**
+- Adds a new endpoint `POST /api/v1/ai/completions/stream`.
+- Passes the user's prompt directly to OpenRouter's `/chat/completions` endpoint with `stream: true`.
+- Native SSE proxy streaming from OpenRouter directly back to the client via `c.Response()`, parsing choices and forwarding tokens `data: {"type": "token", "content": "..."}`.
+
+**Frontend — `web/src/components/MemoEditor/Toolbar/AIActions.tsx`:**
+- Rendered in `EditorToolbar.tsx`.
+- Includes a dropdown with options "Format Markdown" and "Rewrite & Format".
+- Dispatches state updates inside `try...catch` and streams results directly into the editor context (`actions.updateContent(newContent)`).
+- Reverts to the original content upon error.
+
+**Service client — `web/src/utils/aiService.ts`:**
+- Adds `streamCompletion(prompt: string, system: string = "")` to stream backend tokens over `fetch`.
+
+---
+
 ### Web Registration Setting
 
 Controls whether the public sign-up page accepts new accounts.

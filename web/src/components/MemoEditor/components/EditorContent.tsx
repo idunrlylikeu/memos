@@ -1,5 +1,6 @@
 import { forwardRef, useCallback } from "react";
 import MemoContent from "@/components/MemoContent";
+import { MemoViewContext } from "@/components/MemoView/MemoViewContext";
 import Editor, { type EditorRefActions } from "../Editor";
 import { useBlobUrls, useDragAndDrop } from "../hooks";
 import { useEditorContext } from "../state";
@@ -83,7 +84,32 @@ export const EditorContent = forwardRef<EditorRefActions, EditorContentProps>(({
           title="Click to edit"
         >
           {state.content ? (
-            <MemoContent content={state.content} />
+            <MemoViewContext.Provider
+              value={{
+                memo: {
+                  name: "preview",
+                  content: state.content,
+                  visibility: state.metadata.visibility,
+                  state: 1, // NORMAL
+                  creator: "",
+                  tags: [],
+                  pinned: false,
+                  attachments: [],
+                  relations: [],
+                  reactions: [],
+                  snippet: "",
+                } as any,
+                creator: undefined,
+                currentUser: undefined,
+                parentPage: "",
+                isArchived: false,
+                readonly: true,
+                showNSFWContent: false,
+                nsfw: false,
+              }}
+            >
+              <MemoContent content={state.content} />
+            </MemoViewContext.Provider>
           ) : (
             <p className="text-muted-foreground opacity-70 text-base">{placeholder}</p>
           )}

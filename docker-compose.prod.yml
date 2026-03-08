@@ -7,10 +7,6 @@ services:
     build:
       context: .
       dockerfile: docker/backend/Dockerfile.prod
-      target: builder
-      args:
-        VERSION: latest
-        COMMIT: local
     container_name: memos-prod
     ports:
       - "5230:5230"
@@ -19,6 +15,9 @@ services:
       - memos-data:/var/opt/memos
     environment:
       - TZ=UTC
+      - MEMOS_PORT=5230
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - AI_MODEL=${AI_MODEL}
     restart: unless-stopped
 
 volumes:

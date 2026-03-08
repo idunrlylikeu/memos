@@ -81,6 +81,7 @@ func (s *APIV1Service) registerAIChatRoutes(e *echo.Echo) {
 	g.DELETE("/sessions/:uid", s.deleteAIChatSession)
 	g.GET("/sessions/:uid/messages", s.listAIChatMessages)
 	g.POST("/sessions/:uid/chat", s.handleAIChat)
+	g.POST("/completions/stream", s.handleAICompletionsStream)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1418,4 +1419,76 @@ func proxySSEFromOpenRouter(dst io.Writer, resp *http.Response) {
 		}
 	}
 	_ = bytes.NewBuffer(nil) // suppress unused import
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stream Completions
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (s *APIV1Service) handleAICompletionsStream(c *echo.Context) error {
+	if s.Profile.OpenRouterAPIKey == "" {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "AI is not configured (missing OPENROUTER_API_KEY)")
+	}
+
+	_, err := s.requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	var reqBody struct {
+		Prompt string `json:"prompt"`
+		System string `json:"system"`
+	}
+	if err := c.Bind(&reqBody); err != nil || strings.TrimSpace(reqBody.Prompt) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "prompt required")
+	}
+
+	ctx := c.Request().Context()
+	rw := c.Response()
+
+	rw.Header().Set("Content-Type", "text/event-stream")
+	rw.Header().Set("Cache-Control", "no-cache")
+	rw.Header().Set("Connection", "keep-alive")
+	rw.Header().Set("X-Accel-Buffering", "no")
+	rw.WriteHeader(http.StatusOK)
+
+	messages := []map[string]any{}
+	if reqBody.System != "" {
+		messages = append(messages, map[string]any{"role": "system", "content": reqBody.System})
+	}
+	messages = append(messages, map[string]any{"role": "user", "content": reqBody.Prompt})
+
+	orReqBody := map[string]any{
+		"model":    s.Profile.AIModel,
+		"messages": messages,
+		"stream":   true,
+	}
+	bodyBytes, _ := json.Marshal(orReqBody)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://openrouter.ai/api/v1/chat/completions",
+		bytes.NewReader(bodyBytes))
+	if err != nil {
+		slog.Error("failed to create openrouter request", "err", err)
+		return nil
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+s.Profile.OpenRouterAPIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		slog.Error("failed to call openrouter", "err", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("openrouter returned error", "status", resp.Status)
+		return nil
+	}
+
+	// Proxy the stream using our helper, which translates it into our custom SSE format
+	proxySSEFromOpenRouter(rw, resp)
+
+	return nil
 }
